@@ -1,0 +1,197 @@
+> Сергей Курбанов:
+#include "main.h" 
+ 
+#include "stm32l476xx.h" 
+ 
+extern uint32_t systemTimeCounter; 
+uint32_t *spi2_dr = 0x40003c00 + 0x0C; 
+ 
+void delayMs(uint32_t delay) 
+{ 
+ uint32_t curr = systemTimeCounter; 
+ while(systemTimeCounter - curr < delay) 
+ { } 
+} 
+ 
+ 
+ 
+int main(void) 
+{ 
+ // PWR AND SYS ENABLE 
+ RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN; 
+ RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN; 
+ RCC->CR |= RCC_CR_MSIRGSEL; 
+ SysTick_Config(4000000/1000); 
+ NVIC_SetPriority(SysTick_IRQn,0); 
+ NVIC_EnableIRQ(SysTick_IRQn); 
+ 
+ 
+ // switches 
+ RCC->AHB2ENR |= RCC_AHB2ENR_GPIOEEN; 
+ GPIOE->MODER &= ~((3 << GPIO_MODER_MODE15_Pos)|(3 << GPIO_MODER_MODE14_Pos)|(3 << GPIO_MODER_MODE13_Pos)|(3 << GPIO_MODER_MODE12_Pos)); 
+ 
+ //LEDs 
+ RCC->AHB2ENR |= RCC_AHB2ENR_GPIOEEN | RCC_AHB2ENR_GPIOBEN; 
+ GPIOE->MODER &= ~((3 << GPIO_MODER_MODE10_Pos)|(3 << GPIO_MODER_MODE11_Pos)); 
+ GPIOB->MODER &= ~((3 << GPIO_MODER_MODE3_Pos)|(3 << GPIO_MODER_MODE2_Pos)); 
+ 
+ GPIOE->MODER = ((1 << GPIO_MODER_MODE10_Pos)|(1 << GPIO_MODER_MODE11_Pos)); 
+ GPIOB->MODER = ((1 << GPIO_MODER_MODE3_Pos)|(1 << GPIO_MODER_MODE2_Pos)); 
+ 
+ // USART 
+ RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN; 
+ GPIOB->MODER &= ~((3 << GPIO_MODER_MODE6_Pos)| (3 <<GPIO_MODER_MODE7_Pos )); 
+ GPIOB->MODER |= (2 << GPIO_MODER_MODE6_Pos)| (2 <<GPIO_MODER_MODE7_Pos ); 
+ GPIOB->OSPEEDR |=  GPIO_OSPEEDER_OSPEEDR6 | GPIO_OSPEEDER_OSPEEDR7; 
+ GPIOB->AFR[0] |= (7 << GPIO_AFRL_AFSEL6_Pos) | (7 << GPIO_AFRL_AFSEL7_Pos); 
+ 
+ RCC->APB2ENR |= RCC_APB2ENR_USART1EN; 
+ RCC->CCIPR &= ~(RCC_CCIPR_USART1SEL); 
+ 
+ 
+ 
+ USART1->CR1 &= ~(USART_CR1_M0 | USART_CR1_M1); 
+ USART1->CR1 |= USART_CR1_OVER8; 
+ USART1->BRR |= 0x42; 
+ USART1->CR2 &= ~(USART_CR2_STOP); 
+ USART1->CR1 |= USART_CR1_UE; 
+ USART1->CR1 |= USART_CR1_TE | USART_CR1_RE; 
+ 
+ //ADC 
+ RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN; 
+ GPIOA->ASCR |= GPIO_ASCR_ASC1 | GPIO_ASCR_ASC2; 
+ 
+ RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN; 
+ RCC->CCIPR |= (3 << RCC_CCIPR_ADCSEL_Pos); 
+ 
+ ADC123_COMMON->CCR |= (3 << ADC_CCR_CKMODE_Pos); 
+ 
+ // calibration 
+ ADC1->CR &= ~(ADC_CR_DEEPPWD); 
+ ADC1->CR |= ADC_CR_ADVREGEN; 
+ ADC1->CR &= ~ADC_CR_ADEN; 
+ ADC1->CR &= ~ADC_CR_ADCALDIF; 
+ ADC1->CR |= ADC_CR_ADCAL; 
+ while(!(ADC1->CR & ADC_CR_ADCAL)); 
+ 
+ // chanels cfg 
+ ADC1->SMPR1 |= (7 << ADC_SMPR1_SMP6_Pos) | (3 << ADC_SMPR1_SMP7_Pos); 
+ ADC1->SQR1 |= (1 << ADC_SQR1_L_Pos) | (6 << ADC_SQR1_SQ1_Pos) | (7 << ADC_SQR1_SQ2_Pos); 
+ ADC1->CFGR &= (3 << ADC_CFGR_RES_Pos); 
+ ADC1->CFGR |= ADC_CFGR_CONT; 
+ 
+ ADC1->ISR |= ADC_ISR_ADRDY; 
+ ADC1->CR |= ADC_CR_ADEN; 
+ while(!(ADC1->ISR & ADC_ISR_ADRDY)); 
+ 
+ 
+ 
+ 
+ char str[] = "abcde"; 
+ for(int i =0; str[i];i++) 
+ { 
+  while(!(USART1->ISR & USART_ISR_TXE)); 
+  USART1->TDR = str[i]; 
+ } 
+ uint8_t mode = 0; 
+ uint8_t symbol; 
+ uint8_t flag; 
+ uint8_t str1[100]; 
+ 
+  while (1) 
+  { 
+   if(!(GPIOE->IDR & GPIO_IDR_ID12)) 
+   { 
+    mode = 1; 
+    GPIOB->ODR &= ~GPIO_ODR_OD2; 
+    GPIOB->ODR |= GPIO_ODR_OD3; 
+    GPIOE->ODR |= GPIO_ODR_OD10; 
+    GPIOE->ODR |= GPIO_ODR_OD11; 
+   } 
+   if(!(GPIOE->IDR & GPIO_IDR_ID13)) 
+   { 
+    mode = 2; 
+    flag=0; 
+    GPIOB->ODR |= GPIO_ODR_OD2; 
+    GPIOB->ODR &= ~GPIO_ODR_OD3; 
+    GPIOE->ODR |= GPIO_ODR_OD10; 
+    GPIOE->ODR |= GPIO_ODR_OD11; 
+   } 
+   if(!(GPIOE->IDR & GPIO_IDR_ID14)) 
+   { 
+    mode = 3; 
+    GPIOB->ODR |= GPIO_ODR_OD2; 
+    GPIOB->ODR |= GPIO_ODR_OD3; 
+    GPIOE->ODR &= ~GPIO_ODR_OD10; 
+    GPIOE->ODR |= GPIO_ODR_OD11; 
+   } 
+   if(!(GPIOE->IDR & GPIO_IDR_ID15)) 
+   { 
+    mode = 4; 
+    GPIOB->ODR |= GPIO_ODR_OD2; 
+    GPIOB->ODR |= GPIO_ODR_OD3; 
+    GPIOE->ODR |= GPIO_ODR_OD10; 
+    GPIOE->ODR &= ~GPIO_ODR_OD11; 
+   } 
+ 
+   if(mode == 1) 
+   { 
+    if(USART1->ISR & USART_ISR_RXNE) 
+    { 
+     symbol = USART1->RDR; 
+     while(!(USART1->ISR & USART_ISR_TXE)); 
+     USART1->TDR = symbol; 
+ 
+    } 
+   } 
+ 
+   if(mode == 2) 
+     { 
+      if(USART1->ISR & USART_ISR_RXNE) 
+      { 
+       symbol = USART1->RDR; 
+         flag = 1; 
+ 
+ 
+      } 
+        if (flag) 
+        { 
+       while(!(USART1->ISR & USART_ISR_TXE)); 
+       USART1->TDR = symbol; 
+ 
+      } 
+     } 
+ 
+ 
+   if(mode == 3) 
+     {
+
+> Сергей Курбанов:
+while(!(USART1->ISR & USART_ISR_TXE)); 
+       USART1->TDR = symbol; 
+       symbol++; 
+       if(symbol == 127) 
+       symbol = ' '; 
+     } 
+ 
+ 
+   if(mode == 4) 
+        { 
+ 
+       ADC1->CR |= ADC_CR_ADSTART; 
+      while(!(ADC1->ISR & ADC_ISR_EOC)); 
+      uint16_t d1 = ADC1->DR; 
+      ADC1->ISR |= ADC_ISR_EOC; 
+      while(!(ADC1->ISR & ADC_ISR_EOC)); 
+      uint16_t d2 = ADC1->DR; 
+      ADC1->ISR |= ADC_ISR_EOC; 
+      sprintf(str1, "ch1 -%d; ch2 - %d", d1,d2); 
+     for(int i =0; str1[i];i++) 
+     { 
+      while(!(USART1->ISR & USART_ISR_TXE)); 
+      USART1->TDR = str1[i]; 
+     } 
+        } 
+ 
+  } 
+}
